@@ -264,22 +264,39 @@ class ClickerController:
     def _click_once(self, hwnd, x, y, use_child):
         if not win32gui.IsWindow(hwnd):
             return False, None, (x, y), "窗口无效"
-        target, cx, cy = hwnd, x, y
+
+        target = hwnd
+        cx, cy = x, y
+
         if use_child:
             try:
-                left, top, _, _ = win32gui.GetWindowRect(hwnd)
-                sx, sy = left + x, top + y
-                child = win32gui.WindowFromPoint((sx, sy))
-                if child and win32gui.IsWindow(child):
-                    cx, cy = win32gui.ScreenToClient(child, (sx, sy))
-                    target = child
-            except Exception:
-                pass
+                win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+                client_origin = win32gui.ClientToScreen(hwnd, (0, 0))
+                offset_x = client_origin[0] - win_left
+                offset_y = client_origin[1] - win_top
+                client_x = x - offset_x
+                client_y = y - offset_y
+                child = hwnd
+                pt = (client_x, client_y)
+                while True:
+                    sub = win32gui.RealChildWindowFromPoint(child, pt)
+                    if not sub or sub == child:
+                        break
+                    screen_pt = win32gui.ClientToScreen(child, pt)
+                    pt = win32gui.ScreenToClient(sub, screen_pt)
+                    child = sub
+
+                target = child
+                cx, cy = pt
+            except Exception as e:
+                target = hwnd
+                cx, cy = x, y
+
         lparam = win32api.MAKELONG(cx, cy)
         try:
             win32gui.PostMessage(target, win32con.WM_MOUSEMOVE, 0, lparam)
             win32gui.PostMessage(target, win32con.WM_LBUTTONDOWN,
-                                 win32con.MK_LBUTTON, lparam)
+                                win32con.MK_LBUTTON, lparam)
             win32gui.PostMessage(target, win32con.WM_LBUTTONUP, 0, lparam)
             return True, target, (cx, cy), None
         except Exception as e:
@@ -297,10 +314,14 @@ class ClickerController:
             if ok:
                 self.count += 1
                 if target and target != hwnd:
-                    self.log_cb(f"✔ #{self.count} 点击 父({x},{y}) → "
-                                f"子hwnd={target} ({cx},{cy})")
+                    try:
+                        cls = win32gui.GetClassName(target)
+                    except Exception:
+                        cls = "?"
+                    self.log_cb(f"✔ #{self.count} hwnd={hwnd}({x},{y}) "
+                                f"→ 子控件 [{cls}] hwnd={target}({cx},{cy})")
                 else:
-                    self.log_cb(f"✔ #{self.count} 点击 hwnd={hwnd} ({cx},{cy})")
+                    self.log_cb(f"✔ #{self.count} hwnd={hwnd} 客户区=({cx},{cy})")
                 self.status_cb(f"已点击 {self.count} 次")
             else:
                 self.log_cb(f"✘ 点击失败: {err}")
